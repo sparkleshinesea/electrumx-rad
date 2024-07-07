@@ -30,7 +30,8 @@ class MemPoolTx(object):
     fee = attr.ib()
     size = attr.ib()
     out_srefs = attr.ib()
-    idx_to_script = attr.ib()   # Track full output script at given output index
+    idx_to_script = attr.ib()               # Track full output script at given output index
+    codescripthash_out_pairs = attr.ib()    # Track the codescripthash output pairs
 
 @attr.s(slots=True)
 class MemPoolTxSummary(object):
@@ -176,6 +177,9 @@ class MemPool(object):
                 touched.add(hashX)
                 hashXs[hashX].add(tx_hash)
 
+            for codescripthash, _value in itertools.chain(tx.in_pairs, tx.codescripthash_out_pairs):
+                codeScriptHashes[codescripthash].add(tx_hash)
+
             for ref_hashes in tx.out_srefs:
                 if ref_hashes:
                     for ref_hash in ref_hashes:
@@ -235,7 +239,7 @@ class MemPool(object):
         # Re-sync with the new set of hashes
         txs = self.txs
         hashXs = self.hashXs
-        codeScriptHashes = self.codeScriptHashes # not used yet
+        codeScriptHashes = self.codeScriptHashes 
         outpointToRefs = self.outpointToRefs
         to_le_uint32 = pack_le_uint32
         srefs = self.srefs
@@ -262,7 +266,7 @@ class MemPool(object):
             # Handle the outpoints that have disappeared from the mempool to remove the entries in outpointToRefs
             # This maintains the outpointToRefs to always contain the unconfirmed mempool outpoints which contain refs
             out_idx = 0
-            for _pk_script in enumerate(tx.idx_to_script):
+            for _pk_script in tx.idx_to_script:
                 outpointToRefs.pop(tx_hash + to_le_uint32(out_idx), None)
                 out_idx += 1
                   
@@ -299,6 +303,7 @@ class MemPool(object):
 
         def deserialize_txs():    # This function is pure
             to_hashX = self.coin.hashX_from_script
+            to_codeScriptHash = self.coin.codeScriptHash_from_script
             deserializer = self.coin.DESERIALIZER
 
             txs = {}
@@ -315,13 +320,14 @@ class MemPool(object):
                                    if not txin.is_generation())
                 txout_pairs = tuple((to_hashX(Script.zero_refs(txout.pk_script)), txout.value)
                                     for txout in tx.outputs)
+                txout_codescripthash_pairs = tuple((to_codeScriptHash(txout.pk_script), txout.value)
+                                    for txout in tx.outputs)
 
                 out_srefs = []
                 out_idx_to_scripts = []
                 for txout in tx.outputs:
                     out_idx_to_scripts.append(txout.pk_script)
                     normal_refs, singleton_refs = Script.get_push_input_refs(txout.pk_script)[1:]
-
                     normal_mints = []
                     for ref in normal_refs[0:3]:
                         for txin in tx.inputs:
@@ -330,7 +336,6 @@ class MemPool(object):
 
                     # Track all refs
                     track_refs = normal_mints + singleton_refs
-
                     if len(track_refs) > 0:
                         ref_hashes = [to_hashX(ref) for ref in track_refs]
                         out_srefs.append(ref_hashes)
@@ -338,7 +343,7 @@ class MemPool(object):
                         out_srefs.append([])
 
                 txs[tx_hash] = MemPoolTx(txin_pairs, None, txout_pairs,
-                                         0, tx_size, out_srefs, out_idx_to_scripts)
+                                         0, tx_size, out_srefs, out_idx_to_scripts, txout_codescripthash_pairs)
 
             return txs
 
@@ -434,7 +439,9 @@ class MemPool(object):
         actual spends of it (in the DB or mempool) will be included.
         '''
         result = set()
-        # Not implemented yet either
+        for tx_hash in self.codeScriptHashes.get(codeScriptHash, ()):
+            tx = self.txs[tx_hash]
+            result.update(tx.prevouts)
         return result
     
     async def transaction_summaries(self, hashX):
@@ -462,8 +469,19 @@ class MemPool(object):
         return utxos
     
     async def codescripthash_unordered_UTXOs(self, codeScriptHash):
-        # todo: this should be implemented for the codeScripthash
-        return []
+        '''Return an unordered list of UTXO named tuples from mempool
+        transactions that pay to codeScriptHash.
+
+        This does not consider if any other mempool transactions spend
+        the outputs.
+        '''
+        utxos = []
+        for tx_hash in self.codeScriptHashes.get(codeScriptHash, ()):
+            tx = self.txs.get(tx_hash)
+            for pos, (hX, value) in enumerate(tx.codescripthash_out_pairs):
+                if hX == codeScriptHash:
+                    utxos.append(UTXO(-1, pos, tx_hash, 0, value))
+        return utxos
 
     async def first_last_summaries(self, hashX):
         '''Return first and last UTXO tuples from mempool transactions that contain a singleton ref hash.'''

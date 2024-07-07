@@ -415,7 +415,6 @@ class BlockProcessor:
             hashXs = []
             append_hashX = hashXs.append
             tx_numb = to_le_uint64(tx_num)[:5]
-
             # Spend the inputs
             for txin in tx.inputs:
                 if txin.is_generation():
@@ -423,21 +422,18 @@ class BlockProcessor:
                 cache_value = spend_utxo(txin.prev_hash, txin.prev_idx)
                 undo_info_append(cache_value)
                 append_hashX(cache_value[:HASHX_LEN])
-
             # Add the new UTXOs
             for idx, txout in enumerate(tx.outputs):
                 # Ignore unspendable outputs
                 if is_unspendable(txout.pk_script):
                     continue
-
                 # Get the hashX
                 zero_refs = Script.zero_refs(txout.pk_script)
                 hashX = script_hashX(zero_refs)
                 codeScriptHash = script_codeScriptHash(txout.pk_script)
                 append_hashX(hashX)
                 put_utxo(tx_hash + to_le_uint32(idx),
-                         hashX + codeScriptHash + tx_numb + to_le_uint64(txout.value))
-
+                        hashX + codeScriptHash + tx_numb + to_le_uint64(txout.value))
                 all_refs, normal_refs, singleton_refs = Script.get_push_input_refs(txout.pk_script)
                 all_refs_dedup = Script.dedup_refs(all_refs)
                 normal_refs_dedup = Script.dedup_refs(normal_refs)

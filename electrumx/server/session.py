@@ -1236,15 +1236,12 @@ class ElectrumX(SessionBase):
     async def codescripthash_listunspent(self, codeScriptHash):
         '''Return the list of UTXOs of a code script hash, including mempool
         effects.'''
-        hashX = hex_to_bytes(codeScriptHash)
-        utxos = await self.db.codescripthash_all_utxos(hashX)
+        codeScriptHashBytes = hex_to_bytes(codeScriptHash)
+        utxos = await self.db.codescripthash_all_utxos(codeScriptHashBytes)
         utxos = sorted(utxos)
-        # the following codescripthash_unordered_UTXOs is not implemented yet
-        # Need a way to track codescripthash and hashX together
-        utxos.extend(await self.mempool.codescripthash_unordered_UTXOs(hashX))
+        utxos.extend(await self.mempool.codescripthash_unordered_UTXOs(codeScriptHashBytes))
         self.bump_cost(1.0 + len(utxos) / 50)
-         # the following codescripthash_potential_spends is not implemented yet either
-        spends = await self.mempool.codescripthash_potential_spends(hashX)
+        spends = await self.mempool.codescripthash_potential_spends(codeScriptHashBytes)
 
         return [{'tx_hash': hash_to_hex_str(utxo.tx_hash),
                  'tx_pos': utxo.tx_pos,
